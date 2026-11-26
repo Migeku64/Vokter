@@ -1,0 +1,5 @@
+# Credenciales y llaves: nunca en el repositorio
+.env
+*.pem
+*.key
+node_modules/

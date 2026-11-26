@@ -1,0 +1,14 @@
+#cloud-config
+# Instalación automática del servidor VOKTER en Oracle Cloud (Ubuntu 24.04, Ampere A1).
+# Cómo usarlo: al crear la instancia, en "Show advanced options → Management → Paste cloud-init script",
+# pega TODO este archivo. El servidor se instala solo en unos 10 minutos.
+# Guía completa: docs/SERVIDOR-ORACLE.md
+
+package_update: true
+packages:
+  - git
+
+runcmd:
+  - [bash, -c, "git clone --depth 1 https://github.com/Migeku64/Vokter.git /opt/vokter && bash /opt/vokter/deploy/instalar.sh > /var/log/vokter-instalacion.log 2>&1"]
+
+final_message: "VOKTER: instalación terminada. Revisa /var/log/vokter-instalacion.log"

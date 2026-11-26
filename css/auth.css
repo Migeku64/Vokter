@@ -223,3 +223,24 @@
   .pf-total { align-self: flex-end; }
 }
 @media (prefers-reduced-motion: reduce) { .pf-order { transition: none; } .pf-order:hover { transform: none; } }
+
+/* ===== Datos comerciales (Mi cuenta) ===== */
+.pf-comercial { gap: 16px; }
+.co-cta { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; align-items: center; }
+.co-cta h2 { margin: 0 0 4px; }
+.co-cta p { margin: 0; color: var(--ink-soft); max-width: 62ch; }
+.co-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.co-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.co-dato { display: grid; gap: 3px; padding: 14px 16px; border-radius: 18px; background: var(--surface-2); min-width: 0; }
+.co-dato small { color: var(--ink-soft); font-weight: 700; font-size: 12.5px; }
+.co-dato strong { font-size: 15px; overflow-wrap: anywhere; }
+.co-wide { grid-column: span 2; }
+.co-vacio { color: var(--ink-soft); font-weight: 600; font-style: italic; }
+.co-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.co-actions .btn { padding: 11px 18px; font-size: 14px; }
+.co-modal .co-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 18px; }
+.co-modal .au-field { margin-bottom: 16px; }
+.co-modal .au-devcode { margin-bottom: 14px; }
+.co-paso[hidden] { display: none; }
+@media (max-width: 900px) { .co-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .co-cta { grid-template-columns: auto minmax(0, 1fr); } .co-cta .btn { grid-column: 1 / -1; justify-self: start; } }
+@media (max-width: 560px) { .co-grid, .co-modal .co-grid { grid-template-columns: 1fr; } .co-wide { grid-column: auto; } .co-cta { grid-template-columns: 1fr; } }

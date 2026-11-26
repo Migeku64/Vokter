@@ -70,6 +70,8 @@ async function profile(user) {
         <div class="pf-stat"><span class="pf-ico">${icon('truck', 20)}</span><div><small>Último envío</small><strong data-stat="ciudad">—</strong></div></div>
       </div>
 
+      <section class="pf-card pf-comercial" id="pf-comercial" aria-labelledby="pf-co-title"></section>
+
       <div class="pf-grid">
         <section class="pf-card">
           <h2>Datos personales</h2>
@@ -107,6 +109,7 @@ async function profile(user) {
         </section>
       </div>
     </div>`;
+  import('./perfil-comercial.js').then((PC) => PC.mountPerfilComercial($('#pf-comercial'), { user, toast }));
   import('./payments-ui.js').then((PU) => {
     PU.mountMetodos($('#pf-metodos'), { toast, comprador: { nombre: m.nombre || '', documento: m.documento, tipo_documento: m.tipo_documento, celular: m.celular, correo: user.email } });
     PU.mountHistorial($('#pf-pagos'));

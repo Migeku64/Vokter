@@ -41,6 +41,12 @@ export const CONFIG = {
     diasResto: [4, 8]
   },
 
+  // API propia (carpeta backend/) que consulta la base MySQL comercio. Guía: docs/API-COMERCIO.md
+  // En tu computador: http://localhost:3000. En el servidor: la dirección https de la API.
+  api: {
+    url: 'http://localhost:3000'
+  },
+
   // Pagos. Guía: docs/PAGOS.md
   pagos: {
     //   'prueba' → pasarela simulada: solo acepta tarjetas de prueba, nunca cobra.
