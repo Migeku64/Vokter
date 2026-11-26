@@ -25,6 +25,7 @@
     localStorage.setItem(resetMarker, 'done');
   }
   const keys = { theme: 'fanaticos-theme', balance: 'fanaticos-balance', bets: 'fanaticos-bets', profile: 'fanaticos-profile', session: 'fanaticos-auth-session' };
+  const commerceApi = window.FANATICOS_COMMERCE_API || 'http://localhost:3000';
   const state = { sport: 'all', league: 'all', market: 'principales', picks: [], balance: Number(localStorage.getItem(keys.balance) || 250000), authenticated: sessionStorage.getItem('fanaticos-auth-session') === 'true', source: 'local', detailId: null, lastUpdate: 0, hasLoadedReal: false };
   const marketLabels = { principales: 'Principales', goles: 'Goles', corners: 'Corners', mitad: 'Mitad' };
 
@@ -284,10 +285,25 @@
     return bets.filter(bet => period === 'all' || (bet.createdAt && now - Number(bet.createdAt) <= limits[period])).length;
   }
 
+  function profileIsComplete(profile) {
+    if (!profile) return false;
+    const personal = ['firstName', 'lastName', 'email', 'document', 'phone', 'birthDate', 'city', 'country'].every(key => String(profile[key] || '').trim());
+    return personal && Boolean(profile.commercialData?.id);
+  }
+
   function renderProfile(profile = read(keys.profile, null), period = 'all') {
     const panel = $('#profile-panel');
     if (!panel) return;
     const form = $('#profile-form');
+    let completion = $('#profile-completion');
+    if (!completion && form) {
+      completion = document.createElement('div');
+      completion.id = 'profile-completion';
+      completion.className = 'profile-completion is-hidden';
+      completion.innerHTML = '<strong>Completa tu perfil</strong><span>Faltan algunos datos para habilitar toda tu experiencia.</span><button type="button" id="complete-profile">Completar perfil <span>&rarr;</span></button>';
+      form.before(completion);
+    }
+    if (completion) completion.classList.toggle('is-hidden', profileIsComplete(profile));
     if (profile) {
       $('#profile-title').textContent = profile.username || profile.name || 'Mi perfil';
       $('#profile-name').value = profile.name || '';
@@ -317,6 +333,58 @@
     convertToSelect(extras, 'profile-country', ['Colombia', 'Argentina', 'Chile', 'Ecuador', 'Mexico', 'Peru', 'Venezuela', 'Otro pais']);
     bindLocationSelectors(extras, 'profile-country', 'profile-city');
     convertPhoneField(extras, 'profile-phone', 'profile-country');
+  }
+
+  function setupCommerceProfile() {
+    const form = $('#profile-form');
+    if (!form || $('#commerce-profile')) return;
+    const section = document.createElement('section');
+    section.id = 'commerce-profile';
+    section.className = 'commerce-profile';
+    section.innerHTML = '<div class="section-heading"><h3>Datos comerciales</h3><span class="secure-badge">Desde MySQL</span></div><p class="commerce-help">Busca por NIT, cliente, correo o nombre de empresa para completar estos datos automáticamente.</p><div class="commerce-search"><input id="commerce-search" type="search" placeholder="NIT, cliente, correo o empresa"><button type="button" id="commerce-search-button">Buscar</button></div><p class="form-error" id="commerce-error"></p><div id="commerce-results" class="commerce-results"></div>';
+    form.after(section);
+    const renderRecord = (record, target = $('#commerce-results')) => {
+      const fields = [['sociedad', 'Sociedad'], ['actualizacion', 'Actualización'], ['cuenta', 'Cuenta'], ['nombre', 'Nombre'], ['clienteId', 'Cliente ID'], ['nombreAcreedorCliente', 'Empresa / cliente'], ['nit', 'NIT'], ['nombreMaterial', 'Material'], ['jerarquia', 'Jerarquía'], ['asignacion', 'Asignación'], ['direccion', 'Dirección'], ['telefono', 'Teléfono comercial'], ['correo', 'Correo comercial']];
+      const result = target;
+      if (!result) return;
+      result.innerHTML = `<div class="commerce-selected"><strong>Registro encontrado</strong><small>ID ${escapeHtml(record.id)}</small></div><dl>${fields.map(([key, label]) => `<div><dt>${label}</dt><dd>${escapeHtml(record[key] || 'No disponible')}</dd></div>`).join('')}</dl><button type="button" class="primary-button full" id="save-commerce-profile">Usar estos datos en mi perfil <span>&rarr;</span></button>`;
+      on('#save-commerce-profile', 'click', () => { const profile = read(keys.profile, {}); write(keys.profile, { ...profile, commercialData: record }); renderProfile({ ...profile, commercialData: record }); toast('Datos comerciales vinculados al perfil'); });
+    };
+    on('#commerce-search-button', 'click', async () => {
+      const value = $('#commerce-search')?.value.trim() || '';
+      const error = $('#commerce-error');
+      const result = $('#commerce-results');
+      if (!value) { if (error) error.textContent = 'Ingresa un NIT, cliente, correo o empresa.'; return; }
+      if (error) error.textContent = '';
+      if (result) result.innerHTML = '<div class="commerce-loading">Consultando registros...</div>';
+      try {
+        const response = await fetch(`${commerceApi}/api/comercio?search=${encodeURIComponent(value)}&limit=10`, { headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error('No se pudo consultar la base de datos.');
+        const payload = await response.json();
+        if (!payload.data?.length) { if (result) result.innerHTML = '<div class="empty-payment">No encontramos registros coincidentes.</div>'; return; }
+        if (payload.data.length === 1) return renderRecord(payload.data[0]);
+        if (result) result.innerHTML = `<label class="commerce-match-label">Selecciona el registro correcto<select id="commerce-match-select">${payload.data.map((item, index) => `<option value="${index}">${escapeHtml(item.nombreAcreedorCliente || item.nombre || 'Registro')} · ${escapeHtml(item.nit || item.clienteId || '')}</option>`).join('')}</select></label><div id="commerce-match-card"></div>`;
+        const showSelected = () => renderRecord(payload.data[Number($('#commerce-match-select')?.value || 0)], $('#commerce-match-card'));
+        on('#commerce-match-select', 'change', showSelected);
+        showSelected();
+      } catch (requestError) {
+        if (result) result.innerHTML = '';
+        if (error) error.textContent = 'No se pudo conectar con la API de comercio. Inicia el servidor con npm start.';
+      }
+    });
+  }
+
+  function setupCommerceProfileV2() {
+    const form = $('#profile-form');
+    if (!form || $('#commerce-profile')) return;
+    const section = document.createElement('section');
+    section.id = 'commerce-profile';
+    section.className = 'commerce-profile';
+    section.innerHTML = '<div class="section-heading"><h3>Datos comerciales</h3><span class="secure-badge">Desde MySQL</span></div><p class="commerce-help">Ingresa el NIT exacto registrado. Verificaremos el correo comercial antes de mostrar los datos.</p><div class="commerce-search"><input id="commerce-nit" type="text" inputmode="numeric" maxlength="20" placeholder="Ej. 8604044631"><button type="button" id="commerce-nit-button">Buscar NIT</button></div><p class="form-error" id="commerce-error"></p><div id="commerce-results" class="commerce-results"></div>';
+    form.after(section);
+    const fields = [['nombreAcreedorCliente', 'Empresa o titular'], ['nit', 'NIT'], ['clienteId', 'Numero de cliente'], ['cuenta', 'Cuenta comercial'], ['sociedad', 'Sociedad'], ['direccion', 'Direccion'], ['telefono', 'Telefono'], ['correo', 'Correo comercial'], ['nombreMaterial', 'Tipo de registro'], ['actualizacion', 'Actualizacion'], ['jerarquia', 'Jerarquia'], ['asignacion', 'Asignacion']];
+    const showRecord = record => { const result = $('#commerce-results'); if (!result) return; result.innerHTML = `<div class="commerce-selected"><strong>Encontramos tu registro</strong><small>Revisa los datos antes de guardarlos.</small></div><div class="commerce-record-grid">${fields.map(([key, label]) => `<div class="commerce-record-field"><small>${label}</small><strong>${escapeHtml(record[key] || 'No disponible')}</strong></div>`).join('')}</div><div class="commerce-actions"><button type="button" class="outline-button" id="cancel-commerce-profile">Cancelar</button><button type="button" class="primary-button" id="save-commerce-profile">Guardar en mi perfil <span>&rarr;</span></button></div>`; on('#save-commerce-profile', 'click', () => { const profile = read(keys.profile, {}); const updated = { ...profile, commercialData: record }; write(keys.profile, updated); renderProfile(updated); toast('Datos comerciales guardados en tu perfil'); }); on('#cancel-commerce-profile', 'click', () => { result.innerHTML = ''; }); };
+    on('#commerce-nit-button', 'click', async () => { const nit = ($('#commerce-nit')?.value || '').replace(/\D/g, ''); const error = $('#commerce-error'); const result = $('#commerce-results'); if (!nit) { if (error) error.textContent = 'Ingresa el NIT para continuar.'; return; } if (error) error.textContent = ''; if (result) result.innerHTML = '<div class="commerce-loading">Buscando el NIT en MySQL...</div>'; try { const response = await fetch(`${commerceApi}/api/comercio/nit/request`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ nit }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.message || 'No encontramos ese NIT.'); if (result) result.innerHTML = `<div class="commerce-verification"><strong>Confirma tu registro comercial</strong><span>Enviamos un codigo al correo registrado: <b>${escapeHtml(payload.maskedEmail)}</b></span>${payload.developmentCode ? `<small class="commerce-dev-code">Modo desarrollo - Codigo: <b>${payload.developmentCode}</b></small>` : ''}<label>Codigo de verificacion<input id="commerce-code" inputmode="numeric" maxlength="6" placeholder="000000"></label><div class="commerce-actions"><button type="button" class="outline-button" id="change-commerce-nit">Cambiar NIT</button><button type="button" class="primary-button" id="verify-commerce-code">Verificar</button></div></div>`; on('#change-commerce-nit', 'click', () => { if (result) result.innerHTML = ''; $('#commerce-nit')?.focus(); }); on('#verify-commerce-code', 'click', async () => { const code = ($('#commerce-code')?.value || '').replace(/\D/g, ''); if (code.length !== 6) { if (error) error.textContent = 'Ingresa el codigo de 6 digitos.'; return; } try { const verification = await fetch(`${commerceApi}/api/comercio/nit/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ verificationId: payload.verificationId, code }) }); const verified = await verification.json(); if (!verification.ok) throw new Error(verified.message || 'Codigo incorrecto.'); showRecord(verified.data); } catch (verifyError) { if (error) error.textContent = verifyError.message; } }); } catch (requestError) { if (result) result.innerHTML = ''; if (error) error.textContent = requestError.message || 'No se pudo conectar con la API de comercio.'; } });
   }
 
   function profileFromForm() {
@@ -377,13 +445,58 @@
     on('#profile-form', 'submit', event => { event.preventDefault(); const old = read(keys.profile, {}); const profile = { ...old, name: $('#profile-name').value, email: $('#profile-email').value, username: $('#profile-username')?.value || old.username || $('#profile-name').value, firstName: $('#profile-first-name')?.value || old.firstName || '', lastName: $('#profile-last-name')?.value || old.lastName || '', phone: $('#profile-phone')?.value || old.phone || '', city: $('#profile-city')?.value || old.city || '', country: $('#profile-country')?.value || old.country || '', birthDate: $('#profile-birth-date')?.value || old.birthDate || '' }; write(keys.profile, profile); renderProfile(profile); closePanels(); toast('Perfil guardado correctamente'); });
     $$('[data-bet-tab]').forEach(tab => on(tab, 'click', () => { $$('[data-bet-tab]').forEach(item => item.classList.toggle('active', item === tab)); renderHistory(); }));
     on('#logout-button', 'click', () => { state.authenticated = false; sessionStorage.removeItem(keys.session); const authButton = $('#auth-button'); if (authButton) { authButton.textContent = 'Iniciar sesion'; authButton.classList.remove('is-authenticated'); } closePanels(); $('#auth-screen')?.classList.remove('is-hidden'); toast('Sesion cerrada'); });
-    setupExtendedProfile(); on('#profile-form', 'submit', event => { event.preventDefault(); event.stopImmediatePropagation(); showProfileConfirmation(profileFromForm()); }, true); renderProfile(); updateBonusVisibility(); refresh();
+    setupExtendedProfile(); setupCommerceProfileV2(); on('#profile-form', 'submit', event => { event.preventDefault(); event.stopImmediatePropagation(); showProfileConfirmation(profileFromForm()); }, true); renderProfile(); updateBonusVisibility(); refresh();
+  }
+
+  function setupNitLogin(enter) {
+    const loginForm = $('#login-form');
+    if (!loginForm || $('#nit-login')) return;
+    const block = document.createElement('section');
+    block.id = 'nit-login';
+    block.className = 'nit-login';
+    block.innerHTML = '<button type="button" class="nit-login-toggle" id="nit-login-toggle">Iniciar sesion con NIT</button><div id="nit-login-content" class="nit-login-content is-hidden"><p>Usa el NIT registrado en la base comercial. Te enviaremos un codigo al correo asociado.</p><div class="nit-login-row"><input id="nit-login-input" type="text" inputmode="numeric" maxlength="20" placeholder="Numero de NIT"><button type="button" id="nit-login-request">Continuar</button></div><p class="form-error" id="nit-login-error"></p><div id="nit-login-verification"></div></div>';
+    loginForm.after(block);
+    const error = $('#nit-login-error');
+    const verification = $('#nit-login-verification');
+    on('#nit-login-toggle', 'click', () => $('#nit-login-content')?.classList.toggle('is-hidden'));
+    on('#nit-login-request', 'click', async () => {
+      const nit = ($('#nit-login-input')?.value || '').replace(/\D/g, '');
+      if (!nit) { if (error) error.textContent = 'Ingresa un NIT valido.'; return; }
+      if (error) error.textContent = '';
+      if (verification) verification.innerHTML = '<small class="nit-login-loading">Consultando registro...</small>';
+      try {
+        const response = await fetch(`${commerceApi}/api/comercio/nit/request`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ nit }) });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || 'No encontramos ese NIT.');
+        if (verification) verification.innerHTML = `<div class="nit-login-code"><span>Codigo enviado a <b>${escapeHtml(payload.maskedEmail)}</b></span>${payload.developmentCode ? `<small>Modo desarrollo: <b>${payload.developmentCode}</b></small>` : ''}<input id="nit-login-code" inputmode="numeric" maxlength="6" placeholder="Codigo de 6 digitos"><button type="button" id="nit-login-verify">Verificar e iniciar sesion</button></div>`;
+        on('#nit-login-verify', 'click', async () => {
+          const code = ($('#nit-login-code')?.value || '').replace(/\D/g, '');
+          if (code.length !== 6) { if (error) error.textContent = 'Ingresa el codigo de 6 digitos.'; return; }
+          try {
+            const verifiedResponse = await fetch(`${commerceApi}/api/comercio/nit/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ verificationId: payload.verificationId, code }) });
+            const verified = await verifiedResponse.json();
+            if (!verifiedResponse.ok) throw new Error(verified.message || 'El codigo no coincide.');
+            const record = verified.data;
+            const email = String(record.correo || '').trim().toLowerCase();
+            const profile = { name: record.nombreAcreedorCliente || `Cliente ${record.clienteId || record.nit}`, username: `Cliente ${record.clienteId || record.nit}`, email: '', commercialEmail: email, commercialData: record, commercialLogin: true, registeredAt: Date.now() };
+            write(keys.profile, profile);
+            const users = read('fanaticos-users', []);
+            const existingIndex = users.findIndex(item => item.email === email);
+            if (existingIndex >= 0) users[existingIndex] = { ...users[existingIndex], ...profile }; else users.push(profile);
+            write('fanaticos-users', users);
+            enter('Sesion iniciada con los datos comerciales del NIT');
+          } catch (verifyError) { if (error) error.textContent = verifyError.message || 'No se pudo validar el codigo.'; }
+        });
+      } catch (requestError) { if (verification) verification.innerHTML = ''; if (error) error.textContent = requestError instanceof TypeError ? 'No se pudo conectar con la API. Ejecuta npm start.' : requestError.message; }
+    });
+    $$('[data-auth-tab]').forEach(tab => on(tab, 'click', () => block.classList.toggle('is-hidden', tab.dataset.authTab === 'register')));
   }
 
   function setupAuthAndTheme() {
     const auth = $('#auth-screen'); const shell = $('.app-shell'); setupExtendedRegistration();
     const refreshAuthButton = () => { let button = $('#auth-button'); if (!button) return; const profile = read(keys.profile, null); if (state.authenticated && button.tagName === 'BUTTON') { const visual = document.createElement('span'); visual.id = 'auth-button'; visual.className = button.className; button.replaceWith(visual); button = visual; } button.textContent = state.authenticated ? (profile?.username || 'Mi perfil') : 'Iniciar sesion'; button.classList.toggle('is-authenticated', state.authenticated); };
     const enter = (message, authenticated = true) => { auth?.classList.add('is-hidden'); shell?.classList.remove('app-locked'); state.authenticated = authenticated; if (authenticated) sessionStorage.setItem(keys.session, 'true'); else sessionStorage.removeItem(keys.session); refreshAuthButton(); if (message) toast(message); };
+    setupNitLogin(enter);
     if (state.authenticated) enter(); else refreshAuthButton();
     on('#login-form', 'submit', event => { const profile = read(keys.profile, null); const email = $('input[type="email"]', event.currentTarget)?.value.trim().toLowerCase() || ''; const password = $('input[type="password"]', event.currentTarget)?.value || ''; if (!profile || email !== String(profile.email || '').trim().toLowerCase() || password !== String(profile.password || '')) { event.preventDefault(); event.stopImmediatePropagation(); toast('Correo o contraseña incorrectos'); } }, true);
     on('#register-form', 'submit', event => { const birthDate = $('#register-birth-date')?.value; const password = $('input[type="password"]', event.currentTarget)?.value || ''; const confirmation = $('#register-password-confirm')?.value || ''; if (password !== confirmation) { event.preventDefault(); event.stopImmediatePropagation(); return toast('Las contraseñas no coinciden'); } if (!isAdult(birthDate) || !$('#register-terms')?.checked || !$('#register-adult')?.checked) { event.preventDefault(); event.stopImmediatePropagation(); toast(!isAdult(birthDate) ? 'Debes ser mayor de 18 años para registrarte' : 'Acepta los terminos y confirma tu edad'); return; } const firstName = $('#register-first-name')?.value || ''; const lastName = $('#register-last-name')?.value || ''; write(keys.profile, { name: `${firstName} ${lastName}`.trim() || 'Usuario Fanaticos', username: `${firstName} ${lastName}`.trim() || 'Usuario Fanaticos', firstName, lastName, email: $('input[type="email"]', event.currentTarget)?.value || '', password, phone: $('#register-phone')?.value || '', city: $('#register-city')?.value || '', country: $('#register-country')?.value || 'Colombia', birthDate, registeredAt: Date.now() }); }, true);
@@ -426,7 +539,8 @@
 
     const hydrateDocument = () => { const current = read(keys.profile, null); if (current && $('#profile-document')) $('#profile-document').value = `${current.documentType || ''} ${current.document || ''}`.trim(); };
     hydrateDocument();
-    const setEditing = editing => { $$('#profile-fields input').forEach(input => { input.readOnly = !editing; }); $$('#profile-fields select').forEach(select => { select.disabled = !editing; }); $('#edit-profile')?.classList.toggle('is-hidden', editing); $('#save-profile')?.classList.toggle('is-hidden', !editing); $('#cancel-profile')?.classList.toggle('is-hidden', !editing); };
+    const setEditing = editing => { $$('#profile-fields input').forEach(input => { input.readOnly = !editing; }); $$('#profile-fields select').forEach(select => { select.disabled = !editing; }); $('#edit-profile')?.classList.toggle('is-hidden', editing); $('#save-profile')?.classList.toggle('is-hidden', !editing); $('#cancel-profile')?.classList.toggle('is-hidden', !editing); $('#complete-profile')?.classList.toggle('is-hidden', editing); };
+    on('#complete-profile', 'click', () => { setEditing(true); $('#profile-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); toast('Completa los datos faltantes y confirma para guardar.'); });
     on('#edit-profile', 'click', () => setEditing(true));
     on('#profile-form', 'submit', event => { const firstName = $('#profile-first-name')?.value.trim() || ''; const lastName = $('#profile-last-name')?.value.trim() || ''; const email = $('#profile-email')?.value.trim() || ''; const phone = ($('#profile-phone')?.value || '').replace(/\D/g, ''); if (!validGmail(email)) { event.preventDefault(); event.stopImmediatePropagation(); toast('El correo debe terminar en @gmail.com.'); return; } if ((firstName && !validName(firstName)) || (lastName && !validName(lastName))) { event.preventDefault(); event.stopImmediatePropagation(); toast('Nombres y apellidos solo pueden contener letras y espacios.'); return; } if (phone && !/^3\d{9}$/.test(phone)) { event.preventDefault(); event.stopImmediatePropagation(); toast('El celular debe tener exactamente 10 digitos y comenzar por 3.'); } }, true);
     on('#register-password-confirm', 'input', () => { const message = $('#register-error'); const pass = $('#register-password')?.value.trim() || ''; const confirm = $('#register-password-confirm')?.value.trim() || ''; if (message && (!confirm || pass === confirm)) message.textContent = ''; else if (message) message.textContent = 'Las contrasenas no coinciden.'; });
@@ -434,16 +548,17 @@
     on(document, 'click', event => { if (event.target.closest('#confirm-profile-save')) { setEditing(false); hydrateDocument(); } });
 
     const paymentKey = 'fanaticos-payments'; const cards = () => read(paymentKey, []); const brand = number => /^4/.test(number) ? 'VISA' : /^(5[1-5]|2)/.test(number) ? 'MASTERCARD' : 'TARJETA';
-    const renderPayments = () => { const target = $('#saved-payments'); if (!target) return; const list = cards(); target.innerHTML = list.length ? list.map(card => `<article class="saved-payment"><strong>${card.brand} ···· ${card.last4}</strong><small>Vence ${card.expiry}</small><button type="button" data-remove-payment="${card.id}" aria-label="Eliminar tarjeta">&times;</button></article>`).join('') : '<div class="empty-payment">No tienes metodos de pago guardados.</div>'; $$('[data-remove-payment]', target).forEach(button => on(button, 'click', () => { write(paymentKey, cards().filter(card => card.id !== button.dataset.removePayment)); renderPayments(); toast('Metodo de pago eliminado'); })); };
-    on('#add-payment', 'click', () => { if (!state.authenticated) return promptLogin('Inicia sesion para agregar una tarjeta.'); $('#payment-dialog')?.showModal(); });
-    on('#payment-form', 'submit', event => { event.preventDefault(); const number = $('#card-number').value.replace(/\D/g, ''); const expiry = $('#card-expiry').value.trim(); const cvv = $('#card-cvv').value.trim(); const message = $('#payment-error'); const fail = text => { if (message) message.textContent = text; toast(text); }; if (!/^\d{16}$/.test(number)) return fail('Ingresa una tarjeta de 16 digitos.'); if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry)) return fail('Usa el formato MM/AA.'); if (!/^\d{3,4}$/.test(cvv)) return fail('El codigo de seguridad no es valido.'); const list = cards(); list.push({ id: String(Date.now()), brand: brand(number), last4: number.slice(-4), expiry }); write(paymentKey, list); $('#payment-dialog').close(); event.currentTarget.reset(); if (message) message.textContent = ''; renderPayments(); toast('Tarjeta guardada de forma segura'); });
+    const renderPayments = () => { const target = $('#saved-payments'); if (!target) return; const list = cards(); target.innerHTML = list.length ? list.map(card => `<article class="saved-payment"><strong>${card.brand} ···· ${card.last4}</strong><small>${escapeHtml(card.holder || 'Titular no registrado')}</small><button type="button" data-remove-payment="${card.id}" aria-label="Eliminar tarjeta">&times;</button></article>`).join('') : '<div class="empty-payment">No tienes metodos de pago guardados.</div>'; $$('[data-remove-payment]', target).forEach(button => on(button, 'click', () => { write(paymentKey, cards().filter(card => card.id !== button.dataset.removePayment)); renderPayments(); toast('Metodo de pago eliminado'); })); };
+    on('#add-payment', 'click', () => { if (!state.authenticated) return promptLogin('Inicia sesion para agregar una tarjeta.'); editingPaymentId = null; $('#payment-dialog')?.showModal(); });
+    on('#payment-dialog .close-button', 'click', event => { event.preventDefault(); editingPaymentId = null; $('#payment-dialog')?.close(); });
+    on('#payment-form', 'submit', event => { event.preventDefault(); const number = $('#card-number').value.replace(/\D/g, ''); const expiry = $('#card-expiry').value.trim(); const cvv = $('#card-cvv').value.trim(); const holder = $('#card-holder').value.trim(); const message = $('#payment-error'); const fail = text => { if (message) message.textContent = text; toast(text); }; if (!/^\d{16}$/.test(number)) return fail('Ingresa una tarjeta de 16 digitos.'); if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry)) return fail('Usa el formato MM/AA.'); if (!/^\d{3,4}$/.test(cvv)) return fail('El codigo de seguridad no es valido.'); const list = cards(); list.push({ id: String(Date.now()), brand: brand(number), last4: number.slice(-4), holder, expiry }); write(paymentKey, list); $('#payment-dialog').close(); event.currentTarget.reset(); if (message) message.textContent = ''; renderPayments(); toast('Tarjeta guardada de forma segura'); });
     on('#card-number', 'input', event => { const number = event.target.value.replace(/\D/g, '').slice(0, 16); event.target.value = number.replace(/(.{4})/g, '$1 ').trim(); });
     on('#card-expiry', 'input', event => { const value = event.target.value.replace(/\D/g, '').slice(0, 4); event.target.value = value.length > 2 ? `${value.slice(0, 2)}/${value.slice(2)}` : value; });
     let editingPaymentId = null;
     const decoratePaymentCards = () => { const target = $('#saved-payments'); if (!target) return; $$('.saved-payment', target).forEach(card => { if (card.querySelector('[data-edit-payment]')) return; const remove = card.querySelector('[data-remove-payment]'); if (!remove) return; const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'edit-payment'; edit.dataset.editPayment = remove.dataset.removePayment; edit.textContent = 'Editar'; edit.setAttribute('aria-label', 'Editar tarjeta'); remove.parentElement?.insertBefore(edit, remove); }); };
     const paymentObserver = new MutationObserver(decoratePaymentCards); if ($('#saved-payments')) paymentObserver.observe($('#saved-payments'), { childList: true, subtree: true });
-    on(document, 'click', event => { const edit = event.target.closest('[data-edit-payment]'); if (!edit) return; const card = cards().find(item => item.id === edit.dataset.editPayment); if (!card) return; editingPaymentId = card.id; const title = $('.payment-dialog h2'); if (title) title.textContent = 'Editar tarjeta'; $('#card-holder').value = card.holder || ''; $('#card-expiry').value = card.expiry || ''; $('#card-number').value = ''; $('#card-cvv').value = ''; $('#card-number').placeholder = 'Dejar vacio para conservarla'; $('#card-cvv').placeholder = 'No necesario si no cambia'; $('#payment-dialog')?.showModal(); });
-    on('#payment-form', 'submit', event => { if (!editingPaymentId) return; event.preventDefault(); event.stopImmediatePropagation(); const list = cards(); const current = list.find(item => item.id === editingPaymentId); const holder = $('#card-holder').value.trim() || current?.holder || 'Tarjeta guardada'; const expiry = $('#card-expiry').value.trim(); const newNumber = $('#card-number').value.replace(/\D/g, ''); const message = $('#payment-error'); if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry)) { if (message) message.textContent = 'Usa el formato MM/AA.'; return; } if (newNumber && !/^\d{16}$/.test(newNumber)) { if (message) message.textContent = 'La tarjeta debe tener 16 digitos.'; return; } const updated = { ...current, holder, expiry, brand: newNumber ? brand(newNumber) : current.brand, last4: newNumber ? newNumber.slice(-4) : current.last4 }; write(paymentKey, list.map(item => item.id === editingPaymentId ? updated : item)); $('#payment-dialog').close(); event.currentTarget.reset(); editingPaymentId = null; if (message) message.textContent = ''; $('#card-number').placeholder = '0000 0000 0000 0000'; $('#card-cvv').placeholder = 'CVV'; const title = $('.payment-dialog h2'); if (title) title.textContent = 'Agregar tarjeta'; renderPayments(); decoratePaymentCards(); toast('Tarjeta actualizada correctamente'); }, true);
+    on(document, 'click', event => { const edit = event.target.closest('[data-edit-payment]'); if (!edit) return; const card = cards().find(item => item.id === edit.dataset.editPayment); if (!card) return; editingPaymentId = card.id; const title = $('.payment-dialog h2'); if (title) title.textContent = 'Editar tarjeta'; $('#card-holder').value = card.holder || 'Titular guardado'; $('#card-expiry').value = card.expiry || ''; $('#card-number').value = ''; $('#card-cvv').value = ''; $('#card-number').required = false; $('#card-cvv').required = false; $('#card-number').placeholder = 'Dejar vacio para conservarla'; $('#card-cvv').placeholder = 'No necesario si no cambia'; $('#payment-dialog')?.showModal(); });
+    on('#payment-form', 'submit', event => { if (!editingPaymentId) return; event.preventDefault(); event.stopImmediatePropagation(); const list = cards(); const current = list.find(item => item.id === editingPaymentId); const holder = $('#card-holder').value.trim() || current?.holder || 'Titular guardado'; const expiry = $('#card-expiry').value.trim(); const newNumber = $('#card-number').value.replace(/\D/g, ''); const message = $('#payment-error'); if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry)) { if (message) message.textContent = 'Usa el formato MM/AA.'; return; } if (newNumber && !/^\d{16}$/.test(newNumber)) { if (message) message.textContent = 'La tarjeta debe tener 16 digitos.'; return; } const updated = { ...current, holder, expiry, brand: newNumber ? brand(newNumber) : current.brand, last4: newNumber ? newNumber.slice(-4) : current.last4 }; write(paymentKey, list.map(item => item.id === editingPaymentId ? updated : item)); $('#payment-dialog').close(); event.currentTarget.reset(); editingPaymentId = null; $('#card-number').required = true; $('#card-cvv').required = true; if (message) message.textContent = ''; $('#card-number').placeholder = '0000 0000 0000 0000'; $('#card-cvv').placeholder = 'CVV'; const title = $('.payment-dialog h2'); if (title) title.textContent = 'Agregar tarjeta'; renderPayments(); decoratePaymentCards(); toast('Tarjeta actualizada correctamente'); }, true);
     renderPayments(); decoratePaymentCards();
   }
 
