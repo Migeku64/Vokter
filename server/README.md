@@ -14,8 +14,6 @@ npm install
 npm start
 ```
 
-En `.env`, reemplaza `TU_CONTRASENA_DE_MYSQL` por la contraseña real de MySQL.
-
 ## Pruebas
 
 Con el servidor encendido, abre:
